@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>나의 법정교육</title>
+<link rel="stylesheet" href="/app.css">
+<style>
+  main { max-width: 1040px; margin: 0 auto; padding: 24px 16px 60px; display: grid; gap: 20px; }
+  .hero { display: grid; grid-template-columns: 1fr auto; gap: 20px; align-items: center; }
+  .ring { --p: 0; width: 112px; height: 112px; border-radius: 50%; display: grid; place-items: center;
+    background: conic-gradient(var(--success) calc(var(--p) * 1%), #e9edf3 0); }
+  .ring > div { width: 88px; height: 88px; border-radius: 50%; background: var(--surface); display: grid; place-items: center; text-align: center; }
+  .ring b { font-size: 22px; display: block; line-height: 1; }
+  .courses { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+  .course { padding: 18px; display: grid; gap: 10px; align-content: start; }
+  .course h3 { font-size: 16px; }
+  .lessons { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+  .lessons li { display: grid; grid-template-columns: 24px 1fr auto; gap: 8px; align-items: center; }
+  .lnum { width: 22px; height: 22px; border-radius: 50%; background: #edf0f5; display: grid; place-items: center; font-size: 12px; font-weight: 700; color: var(--muted); }
+  .lnum.done { background: var(--success-weak); color: var(--success); }
+  .ltitle a { color: var(--text); }
+  .notif { padding: 12px 16px; border-bottom: 1px solid var(--line); white-space: pre-line; }
+  .notif:last-child { border-bottom: 0; }
+  .notif.unread { background: #fffaf0; }
+  @media (max-width: 640px) { .hero { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><div class="brand-mark">法</div><span id="company">법정필수교육</span></div>
+  <div class="spacer"></div>
+  <span id="who" class="muted"></span>
+  <button class="btn sm" id="pwBtn">비밀번호 변경</button>
+  <button class="btn sm" onclick="logout()">로그아웃</button>
+</header>
+<main>
+  <section class="card card-pad hero">
+    <div>
+      <h1 id="hello"></h1>
+      <p class="muted" id="summary" style="margin:6px 0 0"></p>
+      <p class="small muted" style="margin:10px 0 0">※ 교육 영상은 빨리감기·건너뛰기가 제한되며, 끝까지 시청해야 이수 처리됩니다.</p>
+    </div>
+    <div class="ring" id="ring"><div><span><b id="ringPct">0%</b><span class="small muted">이수율</span></span></div></div>
+  </section>
+
+  <section id="notifCard" class="card hidden">
+    <div class="card-head"><h3>알림</h3><span class="badge warn" id="unreadBadge"></span><div class="spacer"></div><button class="btn sm" id="readAll">모두 읽음</button></div>
+    <div id="notifs"></div>
+  </section>
+
+  <section>
+    <div class="row" style="margin-bottom:12px"><h2 id="yearTitle">교육 과정</h2></div>
+    <div class="courses" id="courses"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><h3>내 수료증</h3><span class="muted small">대표이사 명의로 발급되며, 인쇄 또는 PDF로 저장할 수 있습니다.</span></div>
+    <div id="certs"></div>
+  </section>
+</main>
+<script src="/common.js"></script>
+<script>
+(async () => {
+  const me = await requireUser('learner');
+  $('#company').textContent = me.company_name;
+  $('#who').textContent = `${me.user.department || ''} ${me.user.name} ${me.user.position || ''}`.trim();
+  $('#hello').textContent = `${me.user.name}님, 안녕하세요`;
+  $('#pwBtn').onclick = () => passwordChangeModal();
+
+  const [{ courses, edu_year, final_cert_no }, { items: notifs }, { items: certs }] = await Promise.all([
+    api('GET', '/api/my/courses'), api('GET', '/api/my/notifications'), api('GET', '/api/my/certificates'),
+  ]);
+  // 이수율·수료 표시는 종합 수료증과 같은 기준(필수 과정)으로 계산한다
+  const required = courses.filter((c) => c.required);
+  const done = required.filter((c) => c.completed_at).length;
+  const pct = required.length ? Math.round((done / required.length) * 100) : 0;
+  $('#ring').style.setProperty('--p', pct);
+  $('#ringPct').textContent = `${pct}%`;
+  $('#yearTitle').textContent = `${edu_year}년 법정필수교육`;
+  const optional = courses.length - required.length;
+  $('#summary').innerHTML = courses.length
+    ? `필수 <b>${required.length}</b>개 과정 중 <b>${done}</b>개 이수 완료${final_cert_no ? ' · <b style="color:var(--success)">전 과정 수료</b>' : ` · 남은 필수 과정 <b>${required.length - done}</b>개`}${optional ? ` <span class="small">(선택 과정 ${optional}개 별도)</span>` : ''}`
+    : '현재 배정된 교육 과정이 없습니다.';
+
+  $('#courses').innerHTML = courses.map((c) => {
+    const open = ['open', 'late'].includes(c.phase) || c.completed_at;
+    const next = c.lessons.find((l) => !l.completed_at) || c.lessons[0];
+    const action = c.completed_at
+      ? `<div class="row">${c.cert_no ? `<a class="btn sm primary" target="_blank" href="/certificate?no=${esc(c.cert_no)}">수료증</a>` : ''}</div>`
+      : open && next ? `<a class="btn primary" href="/player?lesson=${next.id}">${c.pct > 0 ? `이어서 학습 (${c.lessons.indexOf(next) + 1}차시)` : '학습 시작'}</a>`
+      : `<button class="btn" disabled>${c.phase === 'before' ? `${esc(c.start_date)} 시작` : '교육 기간 종료'}</button>`;
+    return `<article class="card course">
+      <div class="row">${statusBadge(c.status)}${c.completed_at || c.phase !== 'open' ? '' : dday(c.days_left)}${c.required ? '' : '<span class="badge">선택</span>'}</div>
+      <h3>${esc(c.title)}</h3>
+      <div class="small muted">${esc(c.legal_basis || '')}</div>
+      <div class="small muted">교육기간 ${esc(c.start_date)} ~ ${esc(c.due_date)} · 총 ${fmtMin(c.total_sec)}</div>
+      ${c.phase === 'late' && !c.completed_at ? `<div class="alert small">마감일이 지났습니다. ${c.due_date.slice(0, 4)}-12-31까지 이수하면 ‘지연 이수’로 인정되며, 이후에는 미이수로 확정됩니다.</div>` : ''}
+      <ol class="lessons">${c.lessons.map((l, i) => `<li>
+        <span class="lnum ${l.completed_at ? 'done' : ''}">${l.completed_at ? '✓' : i + 1}</span>
+        <span class="ltitle">${open ? `<a href="/player?lesson=${l.id}">${esc(l.title)}</a>` : esc(l.title)}<span class="small muted"> · ${l.kind === 'video' ? '영상' : '자료'} ${fmtMin(l.duration_sec)}</span></span>
+        <span class="small num muted">${l.completed_at ? '완료' : `${l.pct}%`}</span></li>`).join('')}</ol>
+      <div class="bar ${c.completed_at ? 'ok' : ''}"><i style="width:${c.pct}%"></i></div>
+      <div class="row small"><span class="muted">진도율</span><b class="num">${c.pct}%</b><div class="spacer"></div>${c.completed_at ? `<span class="muted">${fmtDate(c.completed_at)} ${c.late ? '지연 ' : ''}이수</span>` : ''}</div>
+      ${action}
+      ${c.source_note ? `<div class="small muted">${esc(c.source_note)}</div>` : ''}
+    </article>`;
+  }).join('') || '<div class="card empty">배정된 교육이 없습니다.</div>';
+
+  const unread = notifs.filter((n) => !n.read_at).length;
+  if (notifs.length) {
+    $('#notifCard').classList.remove('hidden');
+    $('#unreadBadge').textContent = unread ? `새 알림 ${unread}` : '';
+    $('#unreadBadge').classList.toggle('hidden', !unread);
+    $('#notifs').innerHTML = notifs.slice(0, 5).map((n) => `<div class="notif ${n.read_at ? '' : 'unread'}">
+      <div class="row"><b>${esc(n.title)}</b><span class="spacer"></span><span class="small muted">${fmtDateTime(n.created_at)}</span></div>
+      <div class="small muted" style="margin-top:4px">${esc(n.message)}</div></div>`).join('');
+    $('#readAll').onclick = async () => { await api('POST', '/api/my/notifications/read', {}); $$('.notif.unread').forEach((x) => x.classList.remove('unread')); $('#unreadBadge').classList.add('hidden'); };
+  }
+
+  $('#certs').innerHTML = certs.length ? `<div class="table-wrap"><table><thead><tr><th>증서번호</th><th>구분</th><th>과정</th><th>발급일</th><th></th></tr></thead><tbody>
+    ${certs.map((c) => `<tr><td class="num">${esc(c.cert_no)}</td><td>${c.kind === 'final' ? '<span class="badge ok">전 과정 수료</span>' : '<span class="badge">과정 수료</span>'}</td>
+      <td>${esc(c.title)}</td><td>${fmtDate(c.issued_at)}</td><td><a class="btn sm" target="_blank" href="/certificate?no=${esc(c.cert_no)}">보기·출력</a></td></tr>`).join('')}
+    </tbody></table></div>` : '<div class="empty">아직 발급된 수료증이 없습니다. 교육을 끝까지 시청하면 자동으로 발급됩니다.</div>';
+})().catch((e) => e.message !== 'redirect' && toast(e.message, 'error'));
+</script>
+</body>
+</html>

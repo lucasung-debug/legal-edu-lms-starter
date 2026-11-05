@@ -1,0 +1,7 @@
+.env
+data/
+node_modules/
+public/videos/
+public/docs/
+test/result-*.json
+test/phase1-ids.json

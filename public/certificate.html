@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>수료증</title>
+<link rel="stylesheet" href="/app.css">
+<style>
+  @page { size: A4 portrait; margin: 0; }
+  body { background: #e9ecf1; padding: 24px 16px; }
+  .toolbar { max-width: 210mm; margin: 0 auto 16px; display: flex; gap: 8px; }
+  .paper { width: 210mm; min-height: 297mm; margin: 0 auto; background: #fffdf8; position: relative; padding: 18mm; box-shadow: 0 10px 30px rgba(0,0,0,.15);
+    font-family: "Nanum Myeongjo", "Batang", "바탕", "AppleMyungjo", serif; color: #1c1c1c; }
+  .frame { position: absolute; inset: 10mm; border: 2.5mm double #8a6d3b; pointer-events: none; }
+  .frame::after { content: ""; position: absolute; inset: 3mm; border: .4mm solid #c7ad7a; }
+  .inner { position: relative; min-height: calc(297mm - 36mm); display: flex; flex-direction: column; padding: 14mm 12mm; }
+  .no { font-size: 11pt; }
+  .title { text-align: center; font-size: 40pt; letter-spacing: 18pt; font-weight: 800; margin: 18mm 0 16mm; padding-left: 18pt; }
+  dl { display: grid; grid-template-columns: 34mm 1fr; row-gap: 5mm; font-size: 14pt; margin: 0 6mm; }
+  dt { letter-spacing: 3pt; } dt::after { content: " :"; letter-spacing: 0; }
+  dd { margin: 0; font-weight: 700; }
+  .courses { margin: 6mm 6mm 0; font-size: 11.5pt; border-collapse: collapse; width: calc(100% - 12mm); }
+  .courses th, .courses td { border: .3mm solid #b9a77f; padding: 2.2mm 3mm; white-space: normal; background: transparent; position: static; color: inherit; font-size: 11pt; }
+  .courses th { font-weight: 700; text-align: center; }
+  .statement { font-size: 15pt; line-height: 2; margin: 16mm 6mm 0; text-align: justify; word-break: keep-all; }
+  .date { text-align: center; font-size: 15pt; margin-top: auto; padding-top: 16mm; letter-spacing: 2pt; }
+  .sign { display: flex; justify-content: center; align-items: center; gap: 6mm; margin-top: 12mm; font-size: 20pt; font-weight: 800; letter-spacing: 3pt; }
+  .seal-wrap { position: relative; display: inline-block; }
+  .seal { position: absolute; right: -24mm; top: 50%; transform: translateY(-50%); width: 24mm; height: 24mm; opacity: .9; }
+  .revoked { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
+  .revoked span { transform: rotate(-24deg); font-size: 60pt; color: rgba(220,53,69,.55); border: 2mm solid rgba(220,53,69,.55); padding: 4mm 12mm; font-family: sans-serif; font-weight: 900; }
+  @media print {
+    body { background: none; padding: 0; }
+    .toolbar { display: none; }
+    .paper { box-shadow: none; margin: 0; }
+  }
+  @media screen and (max-width: 860px) { .paper { transform-origin: top left; } }
+</style>
+</head>
+<body>
+<div class="toolbar">
+  <button class="btn" onclick="history.length > 1 ? history.back() : window.close()">← 돌아가기</button>
+  <div class="spacer"></div>
+  <span class="muted small" style="align-self:center">인쇄 대화상자에서 ‘PDF로 저장’을 선택하면 파일로 받을 수 있습니다.</span>
+  <button class="btn primary" onclick="window.print()">인쇄 / PDF 저장</button>
+</div>
+<div class="paper" id="paper"><div class="frame"></div><div class="inner" id="inner"><p class="muted">불러오는 중…</p></div></div>
+<script src="/common.js"></script>
+<script>
+// 직인 이미지가 등록되지 않은 경우 대표이사 이름으로 붉은 원형 인장을 그린다
+function defaultSeal(company, ceo) {
+  const name = esc(ceo || '');
+  const ring = esc((company || '').replace(/\(주\)|㈜|주식회사|[()\s]/g, '').slice(0, 10));
+  return `<svg class="seal" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-label="직인">
+    <defs><path id="arc" d="M 50,50 m -36,0 a 36,36 0 1,1 72,0 a 36,36 0 1,1 -72,0"/></defs>
+    <circle cx="50" cy="50" r="46" fill="none" stroke="#d4232b" stroke-width="4"/>
+    <circle cx="50" cy="50" r="30" fill="none" stroke="#d4232b" stroke-width="1.6"/>
+    <text font-size="10" fill="#d4232b" font-weight="700" letter-spacing="2"><textPath href="#arc" startOffset="0">${ring} 대표이사 ${ring} 대표이사</textPath></text>
+    <text x="50" y="${name.length > 3 ? 50 : 54}" text-anchor="middle" font-size="${name.length > 3 ? 13 : 16}" fill="#d4232b" font-weight="900">${name}</text>
+    <text x="50" y="${name.length > 3 ? 66 : 70}" text-anchor="middle" font-size="9" fill="#d4232b" font-weight="700">之印</text>
+  </svg>`;
+}
+const ymd = (ms) => { const d = new Date(ms + 9 * 3600e3); return `${d.getUTCFullYear()}년 ${d.getUTCMonth() + 1}월 ${d.getUTCDate()}일`; };
+
+(async () => {
+  const no = new URLSearchParams(location.search).get('no');
+  const { cert, courses, seal_image, cert_statement } = await api('GET', `/api/certificates/${encodeURIComponent(no)}`);
+  document.title = `수료증 ${cert.cert_no} — ${cert.holder_name}`;
+  const seal = seal_image ? `<img class="seal" src="${esc(seal_image)}" alt="직인">` : defaultSeal(cert.company_name, cert.ceo_name);
+  const totalSec = cert.total_sec || courses.reduce((a, c) => a + (c.total_sec || 0), 0);
+  const completedAt = courses.map((c) => c.completed_at).filter(Boolean).sort((a, b) => b - a)[0];
+  const courseRows = cert.kind === 'final' ? `<table class="courses"><thead><tr><th style="width:12mm">No</th><th>교육 과정</th><th>관련 법령</th><th style="width:20mm">교육시간</th><th style="width:26mm">이수일</th></tr></thead><tbody>
+      ${courses.map((c, i) => `<tr><td style="text-align:center">${i + 1}</td><td>${esc(c.title)}</td><td>${esc(c.legal_basis || '')}</td><td style="text-align:center">${fmtMin(c.total_sec)}</td><td style="text-align:center">${c.completed_at ? new Date(c.completed_at + 9 * 3600e3).toISOString().slice(0, 10) : ''}</td></tr>`).join('')}
+    </tbody></table>` : '';
+  $('#inner').innerHTML = `
+    <div class="no">제 ${esc(cert.cert_no)} 호</div>
+    <div class="title">수 료 증</div>
+    <dl>
+      <dt>성 명</dt><dd>${esc(cert.holder_name)}</dd>
+      <dt>소 속</dt><dd>${esc([cert.holder_dept, cert.holder_position].filter(Boolean).join(' / ') || '-')}</dd>
+      <dt>교육과정</dt><dd>${esc(cert.title)}</dd>
+      ${cert.kind === 'course' && courses[0]?.legal_basis ? `<dt>근거법령</dt><dd style="font-weight:400">${esc(courses[0].legal_basis)}</dd>` : ''}
+      ${cert.period_text ? `<dt>교육기간</dt><dd>${esc(cert.period_text)}</dd>` : ''}
+      <dt>교육시간</dt><dd>${totalSec ? fmtMin(totalSec) : '-'} (온라인 교육)</dd>
+      <dt>이 수 일</dt><dd>${completedAt ? ymd(completedAt) : ymd(cert.issued_at)}</dd>
+    </dl>
+    ${courseRows}
+    <p class="statement">${esc(cert_statement)}</p>
+    <div class="date">${ymd(cert.issued_at)}</div>
+    <div class="sign"><span>${esc(cert.company_name)}</span><span class="seal-wrap">대표이사 ${esc(cert.ceo_name)}${seal}</span></div>
+    ${cert.revoked_at ? '<div class="revoked"><span>효력 정지</span></div>' : ''}`;
+})().catch((e) => { $('#inner').innerHTML = `<p>${esc(e.message)}</p>`; });
+</script>
+</body>
+</html>

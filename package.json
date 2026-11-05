@@ -1,0 +1,12 @@
+{
+  "name": "legal-edu-lms-starter",
+  "version": "1.0.0",
+  "description": "법정필수교육 LMS — 영상 이수 관리, 수료율 대시보드, 미수료 독촉, 대표이사 명의 수료증",
+  "private": true,
+  "main": "server.js",
+  "engines": { "node": ">=22.13" },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server.js",
+    "test": "node test/run.js"
+  }
+}

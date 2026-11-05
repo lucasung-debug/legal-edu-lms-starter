@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>법정필수교육 로그인</title>
+<link rel="stylesheet" href="/app.css">
+<style>
+  body { min-height: 100vh; display: grid; place-items: center; padding: 16px;
+    background: radial-gradient(1200px 600px at 10% -10%, #dfe7ff 0%, transparent 60%), var(--bg); }
+  .login { width: min(400px, 100%); padding: 32px; }
+  .login h1 { margin: 18px 0 4px; }
+  form { display: grid; gap: 14px; margin-top: 24px; }
+</style>
+</head>
+<body>
+<div class="card login">
+  <div class="brand"><div class="brand-mark">法</div><span id="company">법정필수교육</span></div>
+  <h1>법정필수교육 이수 시스템</h1>
+  <p class="muted" style="margin:0">HR팀에서 발급받은 아이디와 비밀번호로 로그인하세요.</p>
+  <form id="loginForm">
+    <label class="field">아이디<span class="hint">회사 이메일의 @ 앞부분</span><input name="login_id" autocomplete="username" required placeholder="예: gildong.hong"></label>
+    <label class="field">비밀번호<span class="hint">처음 로그인할 때는 휴대폰 번호 뒤 4자리</span><input type="password" name="password" autocomplete="current-password" required></label>
+    <button class="btn primary lg">로그인</button>
+    <p class="muted small" style="margin:0">비밀번호를 잊으셨다면 HR팀에 초기화를 요청하세요. HR 담당자는 아이디 <b>admin</b>으로 로그인합니다.</p>
+  </form>
+</div>
+<script src="/common.js"></script>
+<script>
+  const go = (u) => { location.href = u.role === 'admin' ? '/admin' : '/learn'; };
+  api('GET', '/api/setup').then((s) => {
+    if (s.needed) { location.href = '/setup'; return; }
+    if (s.company_name) $('#company').textContent = s.company_name;
+    api('GET', '/api/me').then((me) => go(me.user)).catch(() => {});
+  });
+  $('#loginForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = e.target.querySelector('button'); btn.disabled = true;
+    try {
+      const { user } = await api('POST', '/api/login', Object.fromEntries(new FormData(e.target)));
+      if (user.must_change_pw) await passwordChangeModal({ forced: true });
+      go(user);
+    } catch (err) { toast(err.message, 'error'); btn.disabled = false; }
+  });
+</script>
+</body>
+</html>

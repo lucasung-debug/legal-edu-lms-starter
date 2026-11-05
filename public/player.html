@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>교육 영상 학습</title>
+<link rel="stylesheet" href="/app.css">
+<style>
+  main { max-width: 1040px; margin: 0 auto; padding: 20px 16px 60px; display: grid; gap: 16px; }
+  .stage { position: relative; background: #000; border-radius: 14px; overflow: hidden; aspect-ratio: 16 / 9; user-select: none; }
+  .stage video, .stage iframe, .stage #yt { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+  /* 영상 위 투명 막: YouTube 자체 컨트롤·클릭 조작을 차단하고 재생/일시정지만 허용 */
+  .shield { position: absolute; inset: 0; z-index: 2; cursor: pointer; display: grid; place-items: center; }
+  .shield .big { width: 76px; height: 76px; border-radius: 50%; background: rgba(0,0,0,.55); color: #fff; display: grid; place-items: center; font-size: 30px; transition: opacity .2s; }
+  .stage.playing .shield .big { opacity: 0; }
+  .controls { position: absolute; left: 0; right: 0; bottom: 0; z-index: 3; padding: 28px 14px 10px; color: #fff;
+    background: linear-gradient(transparent, rgba(0,0,0,.75)); display: grid; gap: 8px; }
+  .track { position: relative; height: 6px; background: rgba(255,255,255,.25); border-radius: 999px; }
+  .track .watched { position: absolute; inset: 0 auto 0 0; background: rgba(255,255,255,.45); border-radius: 999px; }
+  .track .cur { position: absolute; inset: 0 auto 0 0; background: #4f7bff; border-radius: 999px; }
+  .track.seekable { cursor: pointer; }
+  .controls .row { gap: 10px; }
+  .cbtn { background: none; border: 0; color: #fff; font: inherit; font-weight: 600; cursor: pointer; padding: 4px 6px; border-radius: 6px; }
+  .cbtn:hover { background: rgba(255,255,255,.15); }
+  .controls input[type=range] { width: 90px; padding: 0; accent-color: #fff; }
+  .stage:fullscreen { border-radius: 0; aspect-ratio: auto; }
+  /* 드라이브 미리보기 모드: 드라이브 자체 컨트롤을 써야 하므로 가림막을 없애고 우리 컨트롤은 영상 아래로 */
+  .stage.preview-mode { aspect-ratio: auto; }
+  .stage.preview-mode #media { position: relative; aspect-ratio: 16 / 9; }
+  .stage.preview-mode .shield, .stage.preview-mode #backBtn, .stage.preview-mode #vol, .stage.preview-mode #fsBtn, .stage.preview-mode .small:has(+ #vol) { display: none; }
+  .stage.preview-mode .controls { position: static; background: #111; padding-top: 10px; }
+  .info-grid { display: grid; grid-template-columns: 1fr 280px; gap: 16px; }
+  .stat { display: grid; gap: 12px; padding: 18px; align-content: start; }
+  .stat .big { font-size: 28px; font-weight: 800; }
+  .done-banner { display: flex; gap: 12px; align-items: center; padding: 16px 18px; border-radius: 12px; background: var(--success-weak); color: #0b6b35; }
+  .warn-flash { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); z-index: 4; background: rgba(220,53,69,.95); color: #fff; padding: 8px 14px; border-radius: 8px; font-weight: 600; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  .warn-flash.show { opacity: 1; }
+  @media (max-width: 800px) { .info-grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="btn sm" href="/learn">← 목록으로</a>
+  <div class="spacer"></div>
+  <span id="who" class="muted"></span>
+</header>
+<main>
+  <div>
+    <div class="row"><span class="badge info" id="cat"></span><span id="dday"></span></div>
+    <h1 id="title" style="margin-top:8px"></h1>
+    <div class="muted small" id="basis"></div>
+  </div>
+
+  <div id="doneBanner" class="done-banner hidden">
+    <b style="font-size:20px">✓</b>
+    <div><b id="doneTitle">차시 완료</b><div class="small" id="doneText"></div></div>
+    <div class="spacer"></div>
+    <a class="btn hidden" id="nextLink">다음 차시 →</a>
+    <a class="btn primary hidden" id="certLink" target="_blank">수료증 보기</a>
+  </div>
+
+  <div class="card card-pad hidden" id="docPanel" style="display:grid;gap:14px">
+    <div class="alert info">아래 자료를 열어 끝까지 읽은 뒤 <b>확인 완료</b>를 눌러 주세요. 인정 교육시간 <b id="docMin"></b></div>
+    <div class="row"><a class="btn lg" id="docOpen" target="_blank" rel="noopener">📄 자료 열기</a>
+      <label class="check"><input type="checkbox" id="docCheck" disabled> 자료 내용을 모두 확인했습니다</label>
+      <button class="btn primary lg" id="docAck" disabled>확인 완료</button></div>
+    <iframe id="docFrame" title="교육 자료" style="width:100%;height:70vh;border:1px solid var(--line);border-radius:10px;background:#fff"></iframe>
+  </div>
+
+  <div class="alert info hidden" id="previewNote">드라이브 영상입니다. 영상 아래 <b>▶ 시청 시작</b>을 누른 뒤 영상의 재생 버튼을 눌러 주세요. 이 화면이 열려 있는 동안 <b>실제 시청 시간</b>이 쌓이며, 영상 길이만큼 시청해야 이수됩니다.</div>
+
+  <div class="stage" id="stage">
+    <div id="media"></div>
+    <div class="shield" id="shield"><div class="big" id="bigIcon">▶</div></div>
+    <div class="warn-flash" id="flash">빨리감기·건너뛰기는 허용되지 않습니다</div>
+    <div class="controls">
+      <div class="track" id="track"><div class="watched" id="watchedBar"></div><div class="cur" id="curBar"></div></div>
+      <div class="row">
+        <button class="cbtn" id="playBtn" title="재생/일시정지">▶ 재생</button>
+        <button class="cbtn" id="backBtn" title="10초 뒤로">⟲ 10초</button>
+        <span class="num small" id="time">0:00 / 0:00</span>
+        <div class="spacer"></div>
+        <span class="small">🔊</span><input type="range" id="vol" min="0" max="100" value="80" aria-label="볼륨">
+        <button class="cbtn" id="fsBtn" title="전체화면">⛶</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="info-grid">
+    <div class="card card-pad">
+      <h3>과정 안내</h3>
+      <p class="muted" id="desc" style="white-space:pre-line;margin:8px 0 0"></p>
+      <ul class="small muted" style="margin:14px 0 0;padding-left:18px">
+        <li>영상은 1배속으로만 재생되며, 아직 시청하지 않은 구간으로 이동할 수 없습니다.</li>
+        <li>이미 시청한 구간은 되돌려 다시 볼 수 있습니다.</li>
+        <li>다른 탭으로 이동하거나 창을 내려 두어도 계속 재생되며, 시청 기록은 자동 저장됩니다.</li>
+        <li>영상을 끝까지 시청하면 자동으로 이수 처리되고 수료증이 발급됩니다.</li>
+      </ul>
+    </div>
+    <div class="card stat">
+      <div><div class="muted small">진도율</div><div class="big num" id="pct">0%</div></div>
+      <div class="bar" id="pctBar"><i style="width:0"></i></div>
+      <div class="small muted">인정된 시청 위치 <b class="num" id="maxPos">0:00</b> / <span class="num" id="durTxt">-</span></div>
+      <div class="small muted" id="saveState">시청 기록 대기 중</div>
+    </div>
+  </div>
+</main>
+<script src="/common.js"></script>
+<script>
+const lessonId = Number(new URLSearchParams(location.search).get('lesson'));
+let course, player, completed = false;   // course: 현재 차시 상태(서버 응답). completed: 이 차시 완료 여부
+let allowedMax = 0;          // 시청이 인정된 최대 위치(초)
+let lastTick = performance.now();
+let lastBeat = 0;
+let flashTimer;
+
+function youtubeId(url) {
+  const m = /(?:youtu\.be\/|youtube(?:-nocookie)?\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|live\/))([A-Za-z0-9_-]{11})/.exec(url);
+  return m ? m[1] : null;
+}
+
+// ---- 플레이어 어댑터: HTML5 video / YouTube 동일 인터페이스 ----
+function html5Player(url) {
+  return new Promise((resolve, reject) => {
+    const v = document.createElement('video');
+    v.src = url; v.preload = 'auto'; v.playsInline = true; v.disablePictureInPicture = true;
+    v.setAttribute('controlsList', 'nodownload noplaybackrate noremoteplayback');
+    v.addEventListener('contextmenu', (e) => e.preventDefault());
+    $('#media').appendChild(v);
+    const p = {
+      play: () => v.play(), pause: () => v.pause(), time: () => v.currentTime, duration: () => v.duration || 0,
+      seek: (t) => { v.currentTime = t; }, playing: () => !v.paused && !v.ended, setVolume: (x) => { v.volume = x / 100; },
+      onEnded: null, onState: null,
+    };
+    v.addEventListener('ratechange', () => { if (v.playbackRate !== 1) v.playbackRate = 1; });
+    v.addEventListener('seeking', () => { if (!completed && v.currentTime > allowedMax + 0.5) { v.currentTime = allowedMax; flash(); } });
+    v.addEventListener('play', () => p.onState && p.onState());
+    v.addEventListener('pause', () => p.onState && p.onState());
+    v.addEventListener('ended', () => p.onEnded && p.onEnded());
+    v.addEventListener('loadedmetadata', () => resolve(p), { once: true });
+    v.addEventListener('error', () => reject(new Error('영상을 불러올 수 없습니다. 링크를 확인해 주세요.')), { once: true });
+  });
+}
+// 드라이브 미리보기 창: 재생 위치를 읽을 수 없으므로, ‘시청 중’으로 표시된 동안의 실제 시간을 진도로 쓴다.
+// (건너뛰어도 영상 길이만큼 시간이 지나야 이수된다. 서버도 같은 방식으로 경과 시간만 인정한다.)
+function drivePreviewPlayer(driveId, startAt) {
+  $('#stage').classList.add('preview-mode');
+  const f = document.createElement('iframe');
+  f.src = `https://drive.google.com/file/d/${driveId}/preview`;
+  f.allow = 'autoplay; fullscreen'; f.title = '교육 영상';
+  $('#media').appendChild(f);
+  let acc = startAt || 0, on = false, last = performance.now();
+  const p = {
+    play: () => { on = true; last = performance.now(); p.onState && p.onState(); },
+    pause: () => { on = false; p.onState && p.onState(); },
+    time: () => acc, duration: () => course.duration_sec, seek: () => {}, playing: () => on,
+    setVolume: () => {}, onEnded: null, onState: null, preview: true,
+  };
+  setInterval(() => {
+    const t = performance.now();
+    if (on) acc = Math.min(acc + (t - last) / 1000, course.duration_sec);
+    last = t;
+    if (on && acc >= course.duration_sec) { on = false; p.onEnded && p.onEnded(); }
+  }, 250);
+  return p;
+}
+function youtubePlayer(id) {
+  return new Promise((resolve, reject) => {
+    const create = () => {
+      const el = document.createElement('div'); el.id = 'yt'; $('#media').appendChild(el);
+      let p;
+      const yt = new YT.Player('yt', {
+        videoId: id,
+        playerVars: { controls: 0, disablekb: 1, fs: 0, rel: 0, modestbranding: 1, playsinline: 1, iv_load_policy: 3, cc_load_policy: 0 },
+        events: {
+          onReady: () => resolve(p),
+          onError: () => reject(new Error('YouTube 영상을 재생할 수 없습니다. (비공개·퍼가기 금지 영상일 수 있습니다)')),
+          onPlaybackRateChange: () => { if (yt.getPlaybackRate() !== 1) yt.setPlaybackRate(1); },
+          onStateChange: (e) => { if (e.data === YT.PlayerState.ENDED) p.onEnded && p.onEnded(); p.onState && p.onState(); },
+        },
+      });
+      p = {
+        play: () => yt.playVideo(), pause: () => yt.pauseVideo(), time: () => yt.getCurrentTime() || 0, duration: () => yt.getDuration() || 0,
+        seek: (t) => yt.seekTo(t, true), playing: () => yt.getPlayerState() === YT.PlayerState.PLAYING, setVolume: (x) => yt.setVolume(x),
+        onEnded: null, onState: null,
+      };
+    };
+    if (window.YT && YT.Player) return create();
+    window.onYouTubeIframeAPIReady = create;
+    const s = document.createElement('script'); s.src = 'https://www.youtube.com/iframe_api';
+    s.onerror = () => reject(new Error('YouTube 플레이어를 불러올 수 없습니다. 네트워크를 확인해 주세요.'));
+    document.head.appendChild(s);
+  });
+}
+
+function flash() {
+  $('#flash').classList.add('show');
+  clearTimeout(flashTimer); flashTimer = setTimeout(() => $('#flash').classList.remove('show'), 1800);
+}
+
+function render() {
+  // 진도율은 서버 판정과 같은 기준(관리자가 등록한 영상 길이)으로 표시한다
+  const dur = course.duration_sec || player.duration() || 0;
+  const t = player.time();
+  const pct = completed ? 100 : dur ? Math.min(99, Math.floor((allowedMax / dur) * 100)) : 0;
+  $('#time').textContent = `${fmtDur(t)} / ${fmtDur(dur)}`;
+  $('#curBar').style.width = dur ? `${(t / dur) * 100}%` : 0;
+  $('#watchedBar').style.width = completed ? '100%' : dur ? `${(allowedMax / dur) * 100}%` : 0;
+  $('#pct').textContent = `${pct}%`;
+  $('#pctBar').firstElementChild.style.width = `${pct}%`;
+  $('#pctBar').classList.toggle('ok', completed);
+  $('#maxPos').textContent = fmtDur(completed ? dur : allowedMax);
+  $('#durTxt').textContent = dur ? fmtDur(dur) : '-';
+  const playing = player.playing();
+  $('#stage').classList.toggle('playing', playing);
+  $('#playBtn').textContent = player.preview ? (playing ? '❚❚ 시청 일시정지' : '▶ 시청 시작') : playing ? '❚❚ 일시정지' : '▶ 재생';
+  $('#bigIcon').textContent = playing ? '❚❚' : '▶';
+}
+
+function showCompleted(state) {
+  completed = true;
+  course = state;
+  const c = state.course;
+  $('#doneBanner').classList.remove('hidden');
+  $('#doneTitle').textContent = c.completed_at ? `「${c.title}」 과정 이수 완료${c.late ? ' (지연 이수)' : ''}` : `${state.index}차시 완료`;
+  $('#doneText').textContent = c.completed_at
+    ? `${fmtDateTime(c.completed_at)} 이수 처리되었습니다. 수료증이 발급되었습니다.`
+    : `남은 차시를 마치면 과정 이수로 처리됩니다. (${state.index}/${state.count})`;
+  if (state.next_id && !c.completed_at) { $('#nextLink').href = `/player?lesson=${state.next_id}`; $('#nextLink').classList.remove('hidden'); $('#nextLink').classList.add('primary'); }
+  if (c.cert_no) { $('#certLink').href = `/certificate?no=${encodeURIComponent(c.cert_no)}`; $('#certLink').classList.remove('hidden'); }
+  $('#track').classList.add('seekable');
+}
+
+// 서버에 시청 위치 전송. 서버는 실제 경과 시간을 기준으로 진도를 다시 계산한다.
+async function beat(playing, { keepalive = false } = {}) {
+  if (completed) return;
+  lastBeat = performance.now();
+  const body = { lesson_id: lessonId, position: player.time(), playing };
+  try {
+    const res = await fetch('/api/my/progress', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), keepalive });
+    const state = await res.json().catch(() => ({}));
+    if (!res.ok) throw Object.assign(new Error(state.error || `저장 실패 (${res.status})`), { status: res.status });
+    $('#saveState').textContent = `시청 기록 저장됨 · ${new Date().toLocaleTimeString('ko-KR', { hour12: false })}`;
+    if (state.completed_at && !completed) { showCompleted(state); toast(state.course.completed_at ? '🎉 과정 이수 완료! 수료증이 발급되었습니다.' : `${state.index}차시 완료!`); return; }
+    // 서버가 인정한 위치가 기준이다. 화면에서 앞서 나간 만큼은 되돌린다.
+    if (allowedMax > state.max_pos + 3) {
+      allowedMax = state.max_pos;
+      if (player.time() > allowedMax + 1) player.seek(allowedMax);
+    }
+  } catch (e) {
+    // 기록이 저장되지 않는 동안 시청하면 진도로 인정되지 않으므로 재생을 멈춘다
+    if (player.playing()) player.pause();
+    const msg = e.status ? e.message : '네트워크 연결이 끊겨 일시정지했습니다. 연결 후 다시 재생하세요.';
+    $('#saveState').textContent = `저장 실패: ${msg}`;
+    if (playing) toast(msg, 'error');
+  }
+}
+
+function tick() {
+  const nowT = performance.now();
+  const wall = (nowT - lastTick) / 1000;
+  lastTick = nowT;
+  if (!player) return;
+  const t = player.time();
+  if (!completed) {
+    if (t > allowedMax + 1.2) { player.seek(allowedMax); flash(); }
+    else if (player.playing() && t > allowedMax) allowedMax = Math.min(t, allowedMax + wall * 1.1 + 0.3);
+    if (player.playing() && nowT - lastBeat > 5000) beat(true);
+  }
+  render();
+}
+
+function toggle() { player.playing() ? player.pause() : player.play(); }
+
+(async () => {
+  const me = await requireUser('learner');
+  $('#who').textContent = `${me.user.department || ''} ${me.user.name}`.trim();
+  course = await api('GET', `/api/my/lessons/${lessonId}`);
+  const c = course.course;
+  document.title = `${c.title} ${course.index}차시 — 법정필수교육`;
+  $('#title').textContent = `${course.index}차시. ${course.title}`;
+  $('#cat').textContent = `${c.title} · ${course.index}/${course.count}차시`;
+  $('#basis').textContent = [c.legal_basis, `교육기간 ${c.start_date} ~ ${c.due_date}`, c.source_note].filter(Boolean).join(' · ');
+  $('#desc').textContent = c.description || '';
+  $('#dday').innerHTML = c.completed_at ? '' : c.phase === 'late' ? '<span class="badge bad">마감 경과 · 12/31까지 지연 이수 인정</span>' : dday(c.days_left);
+  allowedMax = course.max_pos;
+
+  if (course.kind === 'document') {
+    // 자료 차시: 자료를 열어야 확인 체크가 활성화된다
+    $('#stage').classList.add('hidden');
+    $('.info-grid .stat').classList.add('hidden');
+    $('#docPanel').classList.remove('hidden');
+    $('#docMin').textContent = fmtMin(course.duration_sec);
+    $('#docOpen').href = course.url;
+    $('#docFrame').src = course.url;
+    if (course.completed_at) { showCompleted(course); $('#docCheck').checked = true; return; }
+    const enable = () => { $('#docCheck').disabled = false; };
+    $('#docOpen').addEventListener('click', enable);
+    $('#docFrame').addEventListener('load', () => setTimeout(enable, 1000));
+    $('#docCheck').onchange = (e) => { $('#docAck').disabled = !e.target.checked; };
+    $('#docAck').onclick = async () => {
+      try { const s = await api('POST', `/api/my/lessons/${lessonId}/ack`, {}); showCompleted(s); toast(s.course.completed_at ? '🎉 과정 이수 완료! 수료증이 발급되었습니다.' : `${s.index}차시 완료!`); $('#docAck').disabled = true; }
+      catch (err) { toast(err.message, 'error'); }
+    };
+    return;
+  }
+
+  const ytId = youtubeId(course.url);
+  if (course.drive_id) {
+    // 드라이브 영상: 직접 재생을 먼저 시도하고, 안 되면(공유 범위·할당량) 미리보기 창으로 전환
+    player = null;
+    if (course.drive_stream) {
+      try { player = await Promise.race([html5Player(course.drive_stream), new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 12000))]); }
+      catch { $('#media').innerHTML = ''; }
+    }
+    if (!player) {
+      player = drivePreviewPlayer(course.drive_id, course.completed_at ? course.duration_sec : course.max_pos);
+      $('#previewNote').classList.remove('hidden');
+    }
+  } else {
+    player = await (ytId ? youtubePlayer(ytId) : html5Player(course.url));
+  }
+  player.setVolume(80);
+  const realDur = player.duration();
+  if (!course.completed_at && realDur && Math.abs(realDur - course.duration_sec) > 5) {
+    $('#saveState').textContent = '⚠ 등록된 영상 길이와 실제 영상 길이가 다릅니다. 이수 처리가 되지 않으면 HR팀에 문의하세요.';
+  }
+  if (course.completed_at) showCompleted(course);
+  else if (course.max_pos > 3 && !player.preview) { player.seek(Math.max(0, course.max_pos - 2)); toast(`이전 시청 위치(${fmtDur(course.max_pos)})부터 이어서 재생합니다.`); }
+
+  player.onState = () => { if (!player.playing()) beat(false); else beat(true); render(); };
+  player.onEnded = () => beat(false);
+  $('#shield').onclick = toggle;
+  $('#playBtn').onclick = toggle;
+  $('#backBtn').onclick = () => player.seek(Math.max(0, player.time() - 10));
+  $('#vol').oninput = (e) => player.setVolume(Number(e.target.value));
+  $('#fsBtn').onclick = () => (document.fullscreenElement ? document.exitFullscreen() : $('#stage').requestFullscreen());
+  $('#track').onclick = (e) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const target = ((e.clientX - r.left) / r.width) * (course.duration_sec || player.duration());
+    if (completed || target <= allowedMax) player.seek(target); else flash();
+  };
+  document.addEventListener('keydown', (e) => {
+    if (e.code === 'Space') { e.preventDefault(); toggle(); }
+    if (['ArrowRight', 'End', 'PageDown'].includes(e.code) && !completed) { e.preventDefault(); flash(); }
+  });
+  window.addEventListener('pagehide', () => player.playing() && beat(false, { keepalive: true }));
+  // 창을 내려 두면 브라우저가 화면의 타이머를 늦춰 시청 기록이 끊긴다. 워커의 타이머는 늦춰지지 않으므로 워커로 돌린다.
+  try { new Worker(URL.createObjectURL(new Blob(['setInterval(() => postMessage(0), 250)']))).onmessage = tick; }
+  catch { setInterval(tick, 250); }
+  render();
+})().catch((e) => { if (e.message !== 'redirect') { toast(e.message, 'error'); $('#media').innerHTML = `<div class="empty" style="color:#fff;position:absolute;inset:0;display:grid;place-items:center">${esc(e.message)}</div>`; } });
+</script>
+</body>
+</html>

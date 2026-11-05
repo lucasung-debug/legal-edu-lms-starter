@@ -1,0 +1,3 @@
+# 실행 파일은 인코딩과 줄바꿈이 바뀌면 동작하지 않는다
+*.bat -text
+*.command text eol=lf
